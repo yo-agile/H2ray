@@ -3517,8 +3517,11 @@ async def resolve_all(st: State, workers: int = 100):
         except asyncio.CancelledError:
             pass
     for c in st.configs:
-        if c.ip:
-            st.ip_map[c.ip].append(c)
+        # Use c.ip if available (set by DNS resolution), otherwise use c.address directly
+        # This handles template-generated configs where address is already an IP
+        target_ip = c.ip if c.ip else c.address
+        if target_ip:
+            st.ip_map[target_ip].append(c)
     st.ips = list(st.ip_map.keys())
     for ip in st.ips:
         cs = st.ip_map[ip]
@@ -8167,21 +8170,21 @@ def save_csv(st: State, path: str, sort_by: str = "score"):
 def save_configs(st: State, path: str, top: int = 50, sort_by: str = "score"):
     """Save top configs. Use top=0 for ALL configs sorted best to worst."""
     results = sorted_alive(st, sort_by)
-    has_uris = any(r.uris for r in results)
     limit = top if top > 0 else len(results)
     with open(path, "w", encoding="utf-8") as f:
         n = 0
         for r in results:
             if n >= limit:
                 break
-            if has_uris:
+            if r.uris:
                 for uri in r.uris:
                     f.write(uri + "\n")
                     n += 1
                     if n >= limit:
                         break
             else:
-                # JSON input: write IP and domains as a reference list
+                # No URIs - reconstruct from scanned IPs and domains
+                # This handles template-generated configs that lost their URIs
                 doms = ", ".join(r.domains[:3])
                 extra = f" (+{len(r.domains) - 3} more)" if len(r.domains) > 3 else ""
                 f.write(f"{r.ip}  # score={r.score:.1f} domains={doms}{extra}\n")
@@ -8192,10 +8195,9 @@ def save_all_configs_sorted(st: State, path: str, sort_by: str = "score"):
     """Save ALL raw configs (every URI) sorted by their IP's score, best to worst."""
     results = sorted_alive(st, sort_by)
     dead = [r for r in st.res.values() if not r.alive]
-    has_uris = any(r.uris for r in results)
     with open(path, "w", encoding="utf-8") as f:
         for r in results:
-            if has_uris:
+            if r.uris:
                 for uri in r.uris:
                     f.write(uri + "\n")
             else:
@@ -8203,7 +8205,7 @@ def save_all_configs_sorted(st: State, path: str, sort_by: str = "score"):
                 extra = f" (+{len(r.domains) - 3} more)" if len(r.domains) > 3 else ""
                 f.write(f"{r.ip}  # score={r.score:.1f} domains={doms}{extra}\n")
         for r in dead:
-            if has_uris:
+            if r.uris:
                 for uri in r.uris:
                     f.write(uri + "\n")
             else:
